@@ -12,8 +12,12 @@
   "permissions": ["storage"],
   "host_permissions": [
     "https://github.com/*",
-    "http://127.0.0.1:*/*"
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*"
   ],
+  "background": {
+    "service_worker": "src/background/background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://github.com/*"],
