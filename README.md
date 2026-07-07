@@ -66,8 +66,8 @@ Starcat Safari Plugin 是 Starcat 的 GitHub 页面增强插件。它只在 GitH
 1. 在 Safari 打开 Settings → Advanced, 勾选 Show features for web developers。
 2. 在菜单栏打开 Develop, 启用 Allow Unsigned Extensions。
 3. 打开 Safari Settings → Extensions, 使用 Add Temporary Extension 选择本目录: `supports/extensions/starcat-safari-plugin`。
-4. 在 Starcat 打开 Settings → Integrations → Browser Plugin, 启用服务并复制 token。
-5. 左键点击工具栏里的 Starcat 插件图标, 在弹窗中填入 endpoint 端口和 bearer token。
+4. 在 Starcat 打开 Settings → Integrations → Browser Plugin, 启用服务; 然后到 Settings → Integrations → Local API Key 复制 key。
+5. 左键点击工具栏里的 Starcat 插件图标, 在弹窗中填入 endpoint 端口和 Local API Key。
 6. 点击 Test。
 
 完整配置页仍可从弹窗中的 Open full options 打开。
@@ -83,10 +83,10 @@ http://127.0.0.1:{port}/plugin/v1
 所有业务请求都需要:
 
 ```text
-Authorization: Bearer <companion-token>
+Authorization: Bearer <local-api-key>
 ```
 
-Companion token 只授权本机 loopback 接口, 不等同于 GitHub token、AI key 或 Starcat 后端 API key。
+Starcat Local API Key 只授权本机 loopback 接口, 不等同于 GitHub token、AI key 或 Starcat 后端 API key。
 
 ## 文件说明
 
@@ -100,7 +100,7 @@ Companion token 只授权本机 loopback 接口, 不等同于 GitHub token、AI 
 | `CHANGELOG.md` | 版本变更记录。 |
 | `src/shared/shared.js` | 配置读写、GitHub repo URL 解析、本机 API client。 |
 | `src/popup/` | 左键点击插件图标时显示的快速配对弹窗。 |
-| `src/options/` | 端口、token 配置与连接测试页。 |
+| `src/options/` | 端口、Local API Key 配置与连接测试页。 |
 | `src/content/` | GitHub repo 页面板注入与渲染。 |
 
 ## 验证
