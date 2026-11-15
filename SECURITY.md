@@ -32,6 +32,10 @@ Include:
 
 ## Local API Key Handling
 
+New pairing uses a per-device Companion token stored in extension-origin IndexedDB. Only the extension's own pairing tab controls requests; content scripts receive neither claim secrets nor new tokens. Six digits are for human comparison and are not authentication credentials. App approval permits a one-time claim.
+
+Safari currently uses background HTTP without a CLI native host. Its legacy manual Key storage lacks Chrome's trusted-context restriction. Revoking the device in Starcat invalidates new requests and its event streams; deleting local configuration alone does not revoke app authorization.
+
 The Starcat Local API Key authorizes only local loopback API access. Treat it as a secret:
 
 - Do not publish it in screenshots, bug reports, or logs.

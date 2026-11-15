@@ -71,15 +71,15 @@ Starcat Safari Plugin 是 Starcat 的 GitHub 与 Google 搜索结果增强插件
 1. 在 Safari 打开 Settings → Advanced, 勾选 Show features for web developers。
 2. 在菜单栏打开 Develop, 启用 Allow Unsigned Extensions。
 3. 打开 Safari Settings → Extensions, 使用 Add Temporary Extension 选择本目录: `supports/extensions/starcat-safari-plugin`。
-4. 在 Starcat 打开 Settings → Integrations → Browser Plugin, 启用服务; 然后到 Settings → Integrations → Local API Key 复制 key。
-5. 左键点击工具栏里的 Starcat 插件图标, 在弹窗中填入 endpoint 端口和 Local API Key。
-6. 点击 Test。
+4. 在 Starcat 的 Settings → Integrations → Browser Plugin 启用服务。
+5. 从插件打开“连接 Starcat”，在配对标签页选择发现的 App 后点击连接。
+6. 核对两边六位数字，仅在一致时到 Starcat 批准。
 
-完整配置页仍可从弹窗中的 Open full options 打开。
+切换到 App 时配对标签页保持打开。发现仅检查保存地址、默认 `5051` 和旧端口 `5001`；高级设置保留自定义地址和手工 Key。发现本身不会申请配对。
 
 ## 通信边界
 
-插件只通过 Starcat App 暴露的本机 HTTP 服务通信:
+background 统一处理配对、业务请求与事件流，经 App 本机 HTTP 服务通信。Safari 当前尚未接入 CLI 原生宿主：
 
 ```text
 http://127.0.0.1:{port}/plugin/v1
@@ -88,10 +88,10 @@ http://127.0.0.1:{port}/plugin/v1
 所有业务请求都需要:
 
 ```text
-Authorization: Bearer <local-api-key>
+Authorization: Bearer <browser-device-token-or-manual-key>
 ```
 
-Starcat Local API Key 只授权本机 loopback 接口, 不等同于 GitHub token、AI key 或 Starcat 后端 API key。
+新配对签发独立可撤销 token，保存在扩展 origin 的 IndexedDB；content script 不获取新 token 或配对秘密。Starcat 记录设备名称、配对和访问时间。“取消浏览器配对”撤销服务端授权；“仅清除本地凭据”不撤销授权，离线时还需在 Starcat 撤销。旧手工 Key 仍在扩展 storage 中；Safari 没有 Chrome 的可信上下文 storage 限制，手工 Key 路径不具备新 token 的隔离方式。
 
 ## 文件说明
 
@@ -104,6 +104,8 @@ Starcat Local API Key 只授权本机 loopback 接口, 不等同于 GitHub token
 | `CONTRIBUTING.md` | 本地开发与贡献约定。 |
 | `CHANGELOG.md` | 版本变更记录。 |
 | `src/shared/shared.js` | 配置读写、GitHub repo URL 解析、本机 API client。 |
+| `src/background/background.js` | 受控配对、凭据、loopback 请求与 SSE 代理。 |
+| `src/pairing/` | 稳定六位码配对标签页、有限发现与取消配对。 |
 | `src/popup/` | 左键点击插件图标时显示的快速配对弹窗。 |
 | `src/options/` | 端口、Local API Key 配置与连接测试页。 |
 | `src/content/` | GitHub repo 页面板注入与渲染。 |
@@ -111,7 +113,7 @@ Starcat Local API Key 只授权本机 loopback 接口, 不等同于 GitHub token
 
 ## 发布资料
 
-商店发布前请先阅读 [docs/README.md](docs/README.md)。其中的资料以当前源码行为为准；特别是 Google 搜索页权限、Local API Key 配对和本机 Companion API 的数据边界。
+商店发布前请先阅读 [docs/README.md](docs/README.md)。历史商店材料仍需按新配对及隐私边界重新审核，并完成 containing app 与真实浏览器验收；本次源码实现不解除发布 No-Go。
 
 ## 验证
 
@@ -121,4 +123,6 @@ node --check supports/extensions/starcat-safari-plugin/src/shared/shared.js
 node --check supports/extensions/starcat-safari-plugin/src/popup/popup.js
 node --check supports/extensions/starcat-safari-plugin/src/options/options.js
 node --check supports/extensions/starcat-safari-plugin/src/content/content-script.js
+node --check supports/extensions/starcat-safari-plugin/src/background/background.js
+node --check supports/extensions/starcat-safari-plugin/src/pairing/pairing.js
 ```

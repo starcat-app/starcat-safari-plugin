@@ -14,7 +14,7 @@
     token: "starcatCompanionToken"
   };
 
-  const DEFAULT_SERVICE_URL = "http://127.0.0.1:5001";
+  const DEFAULT_SERVICE_URL = "http://127.0.0.1:5051";
   const REPO_SEGMENT_BLOCKLIST = new Set([
     "about",
     "apps",
@@ -65,11 +65,19 @@
   }
 
   async function loadConfig() {
+    if (!["chrome-extension:", "safari-web-extension:"].includes(globalThis.location?.protocol)) {
+      const reply = await extensionAPI.runtime.sendMessage({ type: "starcat.publicConfig" });
+      return { serviceURL: reply.serviceURL, token: reply.configured ? "background-managed" : "" };
+    }
     const stored = await extensionAPI.storage.local.get([
       STORAGE_KEYS.serviceURL,
       STORAGE_KEYS.port,
-      STORAGE_KEYS.token
+      STORAGE_KEYS.token,
+      "starcatCompanionConnection"
     ]);
+    if (stored.starcatCompanionConnection) {
+      return { ...stored.starcatCompanionConnection, token: "", paired: true };
+    }
     const migratedURL = stored[STORAGE_KEYS.serviceURL]
       || (stored[STORAGE_KEYS.port] ? `http://127.0.0.1:${stored[STORAGE_KEYS.port]}` : DEFAULT_SERVICE_URL);
     return {
@@ -79,6 +87,12 @@
   }
 
   async function saveConfig(config) {
+    const previous = await loadConfig();
+    if (previous.mode === "paired") {
+      if (!config.token && normalizeServiceURL(config.serviceURL) === previous.serviceURL) return;
+      throw new Error("unpair_before_manual_key");
+    }
+    await extensionAPI.storage.local.remove("starcatCompanionConnection");
     await extensionAPI.storage.local.set({
       [STORAGE_KEYS.serviceURL]: normalizeServiceURL(config.serviceURL),
       [STORAGE_KEYS.token]: normalizeToken(config.token)
@@ -111,10 +125,6 @@
     const token = normalizeToken(config.token);
 
     async function request(path, options = {}) {
-      if (!token) {
-        throw new Error("missing_token");
-      }
-
       const response = await extensionAPI.runtime.sendMessage({
         type: "starcat.localRequest",
         path,
@@ -132,10 +142,6 @@
     }
 
     async function streamEvents(params, handlers) {
-      if (!token) {
-        throw new Error("missing_token");
-      }
-
       const subscriptionID = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const port = extensionAPI.runtime.connect({ name: "starcat.events" });
       port.onMessage.addListener((message) => {

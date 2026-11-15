@@ -16,12 +16,16 @@ The extension does not:
 
 ## Local Data Storage
 
-The extension stores only the minimum pairing configuration in browser local extension storage:
+The extension stores connection metadata in browser local extension storage:
 
-- Starcat local service port.
-- Starcat Local API Key.
+- The saved loopback address, randomly generated browser instance ID, and device ID.
+- A manually entered legacy Local API Key, when that advanced option is used.
 
-The Local API Key is used only to authenticate requests to the local Starcat app service on `127.0.0.1`.
+New device tokens are stored separately in extension-origin IndexedDB. Pairing secrets remain in the background, and new tokens are not returned to content scripts. Safari does not provide Chrome's trusted-context storage restriction; the legacy manual Key remains subject to that platform limitation.
+
+The app records the browser type, chosen device name, instance ID, and pairing/access times. It holds the extension origin temporarily to bind the one-time claim. This is a random profile identity, not a hardware or browsing fingerprint. Unpairing revokes app authorization; clearing only local credentials does not, and requires later revocation in Starcat. Shared manual Keys require rotation in the app.
+
+Discovery checks only the saved address and loopback ports `5051` / `5001`. It does not scan the LAN or use cloud discovery. Safari currently uses background HTTP and has no CLI native host integration.
 
 ## Local Communication
 

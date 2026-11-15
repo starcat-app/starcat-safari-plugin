@@ -1,217 +1,262 @@
 /*
- * Starcat Safari background bridge.
- *
- * Safari applies page-like CORS checks to content scripts, so GitHub-injected
- * code cannot reliably fetch the local Starcat service directly. The background
- * worker owns loopback API calls because extension pages are allowed to use the
- * manifest host permissions for 127.0.0.1/localhost.
+ * Companion credentials and transport belong to the extension background.
+ * Content scripts receive business data and a configured flag only. Pairing
+ * messages require an extension-owned page, not a GitHub or Google sender.
  */
-
 (function () {
-  const extensionAPI = globalThis.browser || globalThis.chrome;
-  const STORAGE_KEYS = {
-    serviceURL: "starcatCompanionServiceURL",
-    port: "starcatCompanionPort",
-    token: "starcatCompanionToken"
-  };
-  const DEFAULT_SERVICE_URL = "http://127.0.0.1:5001";
+  const api = globalThis.browser || globalThis.chrome;
+  const DEFAULT_URL = "http://127.0.0.1:5051";
+  const CONNECTION = "starcatCompanionConnection";
+  let pending = null;
+  let pairingQueue = Promise.resolve();
+  const activeStreams = new Set();
+  Promise.resolve(api.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" })).catch(() => {});
 
-  function normalizeServiceURL(value) {
-    const raw = String(value || "").trim();
-    if (!raw) return DEFAULT_SERVICE_URL;
+  // Content scripts use the web page's IndexedDB origin, not the extension's.
+  // Keeping credentials here also protects Safari, which has no setAccessLevel.
+  function credential(action, deviceID, token) {
+    return new Promise((resolve, reject) => {
+      const opening = indexedDB.open("starcat-companion", 1);
+      opening.onupgradeneeded = () => opening.result.createObjectStore("credentials");
+      opening.onerror = () => reject(new Error("credential_storage_failed"));
+      opening.onsuccess = () => {
+        const database = opening.result;
+        const transaction = database.transaction("credentials", action === "get" ? "readonly" : "readwrite");
+        const store = transaction.objectStore("credentials");
+        const request = action === "get" ? store.get(deviceID)
+          : action === "put" ? store.put(token, deviceID) : store.delete(deviceID);
+        transaction.oncomplete = () => { database.close(); resolve(request.result); };
+        transaction.onerror = transaction.onabort = () => { database.close(); reject(new Error("credential_storage_failed")); };
+      };
+    });
+  }
 
-    try {
-      const url = new URL(raw);
-      const isLoopback = url.hostname === "127.0.0.1" || url.hostname === "localhost";
-      if (isLoopback && url.port) {
-        // The Companion server is intentionally HTTP-only on loopback. Keep the
-        // scheme pinned here so stale Safari storage cannot force TLS.
-        url.protocol = "http:";
-        url.pathname = "";
-        url.search = "";
-        url.hash = "";
-        return url.toString().replace(/\/$/, "");
-      }
-    } catch {
-      // Invalid user input falls back to the local default.
+  function localURL(value) {
+    const url = new URL(value || DEFAULT_URL);
+    if (!["127.0.0.1", "localhost"].includes(url.hostname) || !url.port
+        || !["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+      throw new Error("invalid_service_url");
     }
-    return DEFAULT_SERVICE_URL;
+    return `http://${url.hostname}:${url.port}`;
   }
 
-  function normalizeToken(value) {
-    return String(value || "").trim();
-  }
-
-  async function loadConfig() {
-    const stored = await extensionAPI.storage.local.get([
-      STORAGE_KEYS.serviceURL,
-      STORAGE_KEYS.port,
-      STORAGE_KEYS.token
-    ]);
-    const migratedURL = stored[STORAGE_KEYS.serviceURL]
-      || (stored[STORAGE_KEYS.port] ? `http://127.0.0.1:${stored[STORAGE_KEYS.port]}` : DEFAULT_SERVICE_URL);
+  async function config() {
+    const stored = await api.storage.local.get([CONNECTION, "starcatCompanionServiceURL", "starcatCompanionPort", "starcatCompanionToken"]);
+    if (stored[CONNECTION]) {
+      return { ...stored[CONNECTION], token: await credential("get", stored[CONNECTION].deviceID) || "" };
+    }
     return {
-      serviceURL: normalizeServiceURL(migratedURL),
-      token: normalizeToken(stored[STORAGE_KEYS.token])
+      serviceURL: localURL(stored.starcatCompanionServiceURL || (stored.starcatCompanionPort
+        ? `http://127.0.0.1:${stored.starcatCompanionPort}` : DEFAULT_URL)),
+      token: stored.starcatCompanionToken || "", mode: "manual"
     };
   }
 
-  async function requestLocal(path, options = {}) {
-    const config = await loadConfig();
-    if (!config.token) {
-      throw new Error("missing_token");
-    }
-
-    const response = await fetch(`${config.serviceURL}${path}`, {
-      method: options.method || "GET",
-      body: options.body || undefined,
-      headers: {
-        "Authorization": `Bearer ${config.token}`,
-        "Content-Type": "application/json",
-        ...(options.headers || {})
-      }
+  async function jsonRequest(base, path, options = {}, token = "") {
+    const response = await fetch(`${localURL(base)}${path}`, {
+      method: options.method || "GET", body: options.body || undefined,
+      signal: AbortSignal.timeout(5000), cache: "no-store", redirect: "error",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
     });
-
-    const text = await response.text();
-    let body = null;
-    if (text) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = { raw: text };
-      }
-    }
-
+    const body = await response.json();
     if (!response.ok) {
-      const error = new Error(body?.error || `http_${response.status}`);
+      const error = new Error(body.error || `http_${response.status}`);
       error.status = response.status;
-      error.body = body;
       throw error;
     }
     return body;
   }
 
-  async function handleLocalRequest(message) {
-    try {
-      const body = await requestLocal(message.path, {
-        method: message.method,
-        body: message.body
+  function extensionPage(sender) {
+    return sender.id === api.runtime.id && sender.url?.startsWith(api.runtime.getURL("src/"));
+  }
+
+  function businessPath(path, method) {
+    if (typeof path !== "string" || !path.startsWith("/plugin/v1/")) return false;
+    const name = path.split("?")[0];
+    return {
+      GET: ["/plugin/v1/ping", "/plugin/v1/repo-context"],
+      POST: ["/plugin/v1/stars/state", "/plugin/v1/recommendations/more", "/plugin/v1/actions/open"],
+      PATCH: ["/plugin/v1/notes", "/plugin/v1/tags", "/plugin/v1/library-state"]
+    }[method]?.includes(name) === true;
+  }
+
+  // Probe only saved/default/legacy candidates, never a range of local ports.
+  async function discover(savedURL) {
+    const current = await config();
+    const candidates = [...new Set([savedURL || current.serviceURL, DEFAULT_URL, "http://127.0.0.1:5001"].map(localURL))];
+    const found = await Promise.all(candidates.map(async (serviceURL) => {
+      try {
+        const response = await fetch(`${serviceURL}/plugin/v1/discover`, {
+          signal: AbortSignal.timeout(1300), cache: "no-store", redirect: "error"
+        });
+        const data = await response.json();
+        if (!response.ok || data.product !== "starcat" || data.protocol_version !== "1"
+            || data.pairing !== "numeric_comparison" || !data.instance_id) return null;
+        return { serviceURL, instanceID: data.instance_id, channel: data.channel };
+      } catch { return null; }
+    }));
+    const seen = new Set();
+    return found.filter((item) => item && !seen.has(item.instanceID) && seen.add(item.instanceID));
+  }
+
+  async function pairing(message, sender) {
+    if (!extensionPage(sender)) throw new Error("extension_page_required");
+    const action = message.action;
+    if (action === "discover") return { candidates: await discover(message.serviceURL) };
+    if (action === "start") {
+      if ((await config()).mode === "paired") throw new Error("pairing_already_configured");
+      if (pending && !pending.completed && Date.parse(pending.receipt.expires_at) > Date.now()) throw new Error("pairing_pending");
+      // A multi-app result clears the page address; never turn that into an implicit default selection.
+      if (typeof message.serviceURL !== "string" || !message.serviceURL.trim()) throw new Error("service_selection_required");
+      const stored = await api.storage.local.get("starcatCompanionInstanceID");
+      const instanceID = stored.starcatCompanionInstanceID || crypto.randomUUID();
+      await api.storage.local.set({ starcatCompanionInstanceID: instanceID });
+      const serviceURL = localURL(message.serviceURL);
+      const browser = api.runtime.getURL("").startsWith("safari-web-extension:") ? "safari" : "chrome";
+      const receipt = await jsonRequest(serviceURL, "/plugin/v1/pairing/start", {
+        method: "POST", body: JSON.stringify({ instance_id: instanceID, browser, name: message.name || `${browser} browser` })
       });
-      return { ok: true, body };
-    } catch (error) {
-      return {
-        ok: false,
-        error: error.message || "request_failed",
-        status: error.status || 0,
-        body: error.body || null
-      };
+      pending = { serviceURL, receipt, tabID: sender.tab?.id };
+      return { code: receipt.code, expiresAt: receipt.expires_at };
     }
-  }
-
-  function parseSSE(chunk) {
-    const lines = chunk.split("\n");
-    let type = "message";
-    let data = "";
-    for (const line of lines) {
-      if (line.startsWith(":")) continue;
-      if (line.startsWith("event:")) type = line.slice(6).trim();
-      if (line.startsWith("data:")) data += line.slice(5).trim();
+    if (action === "poll" || action === "cancel") {
+      if (!pending || pending.tabID !== sender.tab?.id) throw new Error("pairing_expired");
+      const request = pending;
+      if (action === "poll" && request.completed) return { status: "approved" };
+      const result = await jsonRequest(request.serviceURL, `/plugin/v1/pairing/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ request_id: request.receipt.request_id, claim_secret: request.receipt.claim_secret })
+      });
+      if (action === "cancel") {
+        if (request.completed) {
+          const current = await config();
+          await credential("delete", current.deviceID);
+          await api.storage.local.remove(CONNECTION);
+        }
+        pending = null;
+        return result;
+      }
+      if (result.status === "approved") {
+        if (!result.token || !result.device_id || result.scope !== "companion") throw new Error("invalid_pairing_response");
+        try {
+          await credential("put", result.device_id, result.token);
+          await api.storage.local.set({ [CONNECTION]: {
+            serviceURL: request.serviceURL, mode: "paired", deviceID: result.device_id, scope: result.scope
+          } });
+        } catch (error) {
+          await credential("delete", result.device_id).catch(() => {});
+          await jsonRequest(request.serviceURL, "/plugin/v1/devices/revoke-current", { method: "POST" }, result.token).catch(() => {});
+          pending = null;
+          throw new Error("credential_storage_failed");
+        }
+        request.completed = true;
+        await api.storage.local.remove("starcatCompanionToken").catch(() => {});
+      }
+      if (!["pending", "approved"].includes(result.status)) pending = null;
+      return { status: result.status };
     }
-    if (!data) return null;
-    try {
-      return { type, data: JSON.parse(data) };
-    } catch {
-      return null;
-    }
-  }
-
-  function safePostMessage(port, message) {
-    try {
-      port.postMessage(message);
-    } catch {
-      // GitHub soft navigation can disconnect the content-script port while the
-      // local event stream is still unwinding. Dropping the stale message is OK.
-    }
-  }
-
-  async function streamEventsToPort(port, subscriptionID, repoID, controller) {
-    try {
-      const query = new URLSearchParams();
-      if (repoID) query.set("repo_id", String(repoID));
-      const response = await requestEventStream(`/plugin/v1/events?${query.toString()}`, controller.signal);
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (!controller.signal.aborted) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-        for (const part of parts) {
-          const event = parseSSE(part);
-          if (event) {
-            safePostMessage(port, { type: "starcat.event", subscriptionID, event });
-          }
+    if (action === "disconnect") {
+      const current = await config();
+      let revoked = false;
+      if (current.mode === "paired" && current.token) {
+        try {
+          await jsonRequest(current.serviceURL, "/plugin/v1/devices/revoke-current", { method: "POST" }, current.token);
+          revoked = true;
+        } catch (error) {
+          if (error.status === 401) revoked = true;
+          else if (!message.localOnly) return { status: "revoke_failed" };
         }
       }
+      if (current.deviceID) await credential("delete", current.deviceID);
+      await api.storage.local.remove([CONNECTION, "starcatCompanionToken"]);
+      for (const stream of activeStreams) stream.abort();
+      return { status: revoked ? "revoked" : "local_only" };
+    }
+    throw new Error("unsupported_pairing_action");
+  }
+
+  async function handle(message, sender) {
+    if (message?.type === "starcat.publicConfig") {
+      const current = await config();
+      return { serviceURL: current.serviceURL, configured: Boolean(current.token) };
+    }
+    if (message?.type === "starcat.pairing") {
+      const operation = pairingQueue.then(() => pairing(message, sender));
+      pairingQueue = operation.catch(() => {});
+      return { ok: true, body: await operation };
+    }
+    if (message?.type !== "starcat.localRequest") return undefined;
+    const method = message.method || "GET";
+    if (!businessPath(message.path, method)) throw new Error("unsupported_local_request");
+    const current = await config();
+    if (!current.token) throw new Error("missing_token");
+    try {
+      return { ok: true, body: await jsonRequest(current.serviceURL, message.path, { method, body: message.body }, current.token) };
     } catch (error) {
-      if (!controller.signal.aborted) {
-        safePostMessage(port, {
-          type: "starcat.event.error",
-          subscriptionID,
-          error: error.message || "events_failed"
-        });
-      }
+      if (error.status === 401 && current.mode === "paired") error.message = "pairing_revoked";
+      throw error;
     }
   }
 
-  async function requestEventStream(path, signal) {
-    const config = await loadConfig();
-    if (!config.token) {
-      throw new Error("missing_token");
-    }
-    const response = await fetch(`${config.serviceURL}${path}`, {
-      headers: {
-        "Authorization": `Bearer ${config.token}`,
-        "Accept": "text/event-stream"
-      },
-      signal
-    });
-    if (!response.ok || !response.body) {
-      throw new Error(`events_http_${response.status}`);
-    }
-    return response;
-  }
-
-  extensionAPI.runtime.onMessage.addListener((message) => {
-    if (message?.type !== "starcat.localRequest") return false;
-    return handleLocalRequest(message);
+  api.runtime.onMessage.addListener((message, sender, reply) => {
+    if (!["starcat.publicConfig", "starcat.pairing", "starcat.localRequest"].includes(message?.type)) return false;
+    handle(message, sender).then(reply, (error) => reply({ ok: false, error: error.message, status: error.status || 0 }));
+    return true;
   });
 
-  extensionAPI.runtime.onConnect.addListener((port) => {
+  // Background owns SSE headers as well. Disconnect and revocation never expose
+  // tokens to ports, and no automatic fallback or reconnection is attempted.
+  api.runtime.onConnect.addListener((port) => {
     if (port.name !== "starcat.events") return;
-
-    const controllers = new Map();
-    port.onMessage.addListener((message) => {
-      if (message?.type === "open") {
-        const controller = new AbortController();
-        controllers.set(message.subscriptionID, controller);
-        streamEventsToPort(port, message.subscriptionID, message.repoID, controller);
+    const streams = new Map();
+    port.onMessage.addListener(async (message) => {
+      if (message.type === "close") {
+        streams.get(message.subscriptionID)?.abort();
+        streams.delete(message.subscriptionID);
         return;
       }
-      if (message?.type === "close") {
-        controllers.get(message.subscriptionID)?.abort();
-        controllers.delete(message.subscriptionID);
+      if (message.type !== "open") return;
+      const controller = new AbortController();
+      streams.get(message.subscriptionID)?.abort();
+      streams.set(message.subscriptionID, controller);
+      activeStreams.add(controller);
+      try {
+        const current = await config();
+        if (!current.token) throw new Error("missing_token");
+        const query = new URLSearchParams();
+        if (message.repoID) query.set("repo_id", String(message.repoID));
+        const response = await fetch(`${localURL(current.serviceURL)}/plugin/v1/events?${query}`, {
+          headers: { Authorization: `Bearer ${current.token}`, Accept: "text/event-stream" },
+          signal: controller.signal, cache: "no-store", redirect: "error"
+        });
+        if (!response.ok || !response.body) throw new Error(`events_http_${response.status}`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.replace(/\r\n/g, "\n").split("\n\n");
+          buffer = parts.pop();
+          for (const part of parts) {
+            const lines = part.split("\n");
+            const data = lines.filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trim()).join("\n");
+            if (!data) continue;
+            const type = lines.find((line) => line.startsWith("event:"))?.slice(6).trim() || "message";
+            port.postMessage({ type: "starcat.event", subscriptionID: message.subscriptionID, event: { type, data: JSON.parse(data) } });
+          }
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          try { port.postMessage({ type: "starcat.event.error", subscriptionID: message.subscriptionID, error: error.message }); } catch {}
+        }
+      } finally {
+        if (streams.get(message.subscriptionID) === controller) streams.delete(message.subscriptionID);
+        activeStreams.delete(controller);
       }
     });
-
-    port.onDisconnect.addListener(() => {
-      for (const controller of controllers.values()) {
-        controller.abort();
-      }
-      controllers.clear();
-    });
+    port.onDisconnect.addListener(() => { for (const stream of streams.values()) stream.abort(); });
   });
 })();

@@ -2,6 +2,8 @@
 
 本目录保存 Safari App Store 上架准备资料，不是 Safari 临时加载说明，也不会替代 Safari Web Extension Packager 的正式产物。
 
+> 2026-11-15：源码新增设备 token、稳定六位码配对页与 background 配对。历史商店材料仍需按根 README / PRIVACY / SECURITY 核对新流程，并完成 containing app、签名和真实 Safari 验收；当前 HTTP 通道不代表已实现 CLI 原生宿主，发布继续 No-Go。
+
 | 文件 | 用途 |
 |---|---|
 | [STORE_RELEASE_GUIDE.md](STORE_RELEASE_GUIDE.md) | Packager、App Store Connect 与提交流程。 |

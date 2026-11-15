@@ -71,15 +71,15 @@ Starcat Safari Plugin enhances GitHub repository pages and Google search results
 1. Open Safari Settings → Advanced and enable Show features for web developers.
 2. Open Develop in the menu bar and enable Allow Unsigned Extensions.
 3. Open Safari Settings → Extensions, choose Add Temporary Extension, and select `supports/extensions/starcat-safari-plugin`.
-4. In Starcat, open Settings → Integrations → Browser Plugin and enable the service. Then open Settings → Integrations → Local API Key and copy the key.
-5. Left-click the Starcat toolbar icon and enter the endpoint port and Local API Key in the popup.
-6. Click Test.
+4. In Starcat, enable Settings → Integrations → Browser Plugin.
+5. Open Connect to Starcat from the extension, choose the discovered app, and click Connect in the pairing tab.
+6. Compare the six digits in both windows and approve the matching request in Starcat.
 
-The full configuration page remains available through Open full options in the popup.
+The pairing tab stays open while switching to Starcat. Discovery checks the saved address, default port `5051`, and legacy port `5001`; custom addresses and manual Keys remain available in advanced settings. Discovery does not request approval.
 
 ## Communication Boundary
 
-The extension communicates only with the local HTTP service exposed by the Starcat app:
+The background owns pairing, Companion requests, and event streams through the app's local HTTP service. Safari currently has no CLI native host integration:
 
 ```text
 http://127.0.0.1:{port}/plugin/v1
@@ -88,10 +88,10 @@ http://127.0.0.1:{port}/plugin/v1
 Every business request requires:
 
 ```text
-Authorization: Bearer <local-api-key>
+Authorization: Bearer <browser-device-token-or-manual-key>
 ```
 
-The Starcat Local API Key authorizes only the local loopback interface. It is not a GitHub token, AI key, or Starcat backend API key.
+Pairing issues an independent revocable token stored in extension-origin IndexedDB; new device tokens and pairing secrets are never returned to content scripts. Starcat records device names and pairing/access times. Unpair browser revokes server authorization; Clear locally only does not, and requires later revocation in Starcat when offline. Legacy manual Keys remain in extension storage; Safari lacks Chrome's trusted-context storage restriction, so manual Key authentication does not provide the new token isolation.
 
 ## Repository Layout
 
@@ -104,6 +104,8 @@ The Starcat Local API Key authorizes only the local loopback interface. It is no
 | `CONTRIBUTING.md` | Local development and contribution guidelines. |
 | `CHANGELOG.md` | Version history. |
 | `src/shared/shared.js` | Configuration storage, GitHub repository URL parsing, and local API client. |
+| `src/background/background.js` | Controlled pairing, credentials, loopback requests, and SSE proxy. |
+| `src/pairing/` | Stable six-digit pairing tab, discovery, and unpairing. |
 | `src/popup/` | Quick-pairing popup shown when the toolbar icon is left-clicked. |
 | `src/options/` | Endpoint port, Local API Key, and connection testing. |
 | `src/content/` | Page injection and rendering for GitHub repositories and Google search results. |
@@ -111,7 +113,7 @@ The Starcat Local API Key authorizes only the local loopback interface. It is no
 
 ## Release Materials
 
-Read [docs/README.md](docs/README.md) before preparing a store release. The documents follow the current source behavior, especially the permissions used on Google search pages, Local API Key pairing, and the local Companion API data boundary.
+Read [docs/README.md](docs/README.md) before preparing a store release. Historical store materials require a pairing/privacy review, containing-app validation, and real browser acceptance before submission. Source implementation does not remove the release No-Go.
 
 ## Validation
 
@@ -121,4 +123,6 @@ node --check supports/extensions/starcat-safari-plugin/src/shared/shared.js
 node --check supports/extensions/starcat-safari-plugin/src/popup/popup.js
 node --check supports/extensions/starcat-safari-plugin/src/options/options.js
 node --check supports/extensions/starcat-safari-plugin/src/content/content-script.js
+node --check supports/extensions/starcat-safari-plugin/src/background/background.js
+node --check supports/extensions/starcat-safari-plugin/src/pairing/pairing.js
 ```
