@@ -52,19 +52,34 @@
     };
   }
 
-  async function jsonRequest(base, path, options = {}, token = "") {
-    const response = await fetch(`${localURL(base)}${path}`, {
-      method: options.method || "GET", body: options.body || undefined,
-      signal: AbortSignal.timeout(5000), cache: "no-store", redirect: "error",
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+  // Bound the entire response, including body decoding, and abort timed-out
+  // fetches. Writes are never automatically retried after a timeout.
+  async function withTimeout(operation, milliseconds, code = "connection_timeout") {
+    if (milliseconds <= 0) throw new Error(code);
+    const controller = new AbortController();
+    let timer;
+    const timeout = new Promise((_resolve, reject) => {
+      timer = setTimeout(() => { reject(new Error(code)); controller.abort(); }, milliseconds);
     });
-    const body = await response.json();
-    if (!response.ok) {
-      const error = new Error(body.error || `http_${response.status}`);
-      error.status = response.status;
-      throw error;
-    }
-    return body;
+    try { return await Promise.race([operation(controller.signal), timeout]); }
+    finally { clearTimeout(timer); }
+  }
+
+  async function jsonRequest(base, path, options = {}, token = "") {
+    return withTimeout(async (signal) => {
+      const response = await fetch(`${localURL(base)}${path}`, {
+        method: options.method || "GET", body: options.body || undefined,
+        signal, cache: "no-store", redirect: "error",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+      });
+      const body = await response.json();
+      if (!response.ok) {
+        const error = new Error(body.error || `http_${response.status}`);
+        error.status = response.status;
+        throw error;
+      }
+      return body;
+    }, 5000);
   }
 
   function extensionPage(sender) {
@@ -81,23 +96,34 @@
     }[method]?.includes(name) === true;
   }
 
-  // Probe only saved/default/legacy candidates, never a range of local ports.
+  // Probe only the saved address and App default, never a range of local ports.
   async function discover(savedURL) {
-    const current = await config();
-    const candidates = [...new Set([savedURL || current.serviceURL, DEFAULT_URL, "http://127.0.0.1:5001"].map(localURL))];
-    const found = await Promise.all(candidates.map(async (serviceURL) => {
-      try {
-        const response = await fetch(`${serviceURL}/plugin/v1/discover`, {
-          signal: AbortSignal.timeout(1300), cache: "no-store", redirect: "error"
-        });
-        const data = await response.json();
-        if (!response.ok || data.product !== "starcat" || data.protocol_version !== "1"
-            || data.pairing !== "numeric_comparison" || !data.instance_id) return null;
-        return { serviceURL, instanceID: data.instance_id, channel: data.channel };
-      } catch { return null; }
-    }));
-    const seen = new Set();
-    return found.filter((item) => item && !seen.has(item.instanceID) && seen.add(item.instanceID));
+    const deadline = Date.now() + 5000;
+    return withTimeout(async () => {
+      const current = await config();
+      const candidates = [...new Set([savedURL || current.serviceURL, DEFAULT_URL].map(localURL))];
+      let timedOut = false;
+      const found = await Promise.all(candidates.map(async (serviceURL) => {
+        try {
+          return await withTimeout(async (signal) => {
+            const response = await fetch(`${serviceURL}/plugin/v1/discover`, {
+              signal, cache: "no-store", redirect: "error"
+            });
+            const data = await response.json();
+            if (!response.ok || data.product !== "starcat" || data.protocol_version !== "1"
+                || data.pairing !== "numeric_comparison" || !data.instance_id) return null;
+            return { serviceURL, instanceID: data.instance_id, channel: data.channel };
+          }, Math.min(1300, deadline - Date.now()), "discovery_timeout");
+        } catch (error) {
+          if (error.message === "discovery_timeout") timedOut = true;
+          return null;
+        }
+      }));
+      const seen = new Set();
+      const matches = found.filter((item) => item && !seen.has(item.instanceID) && seen.add(item.instanceID));
+      if (!matches.length && timedOut) throw new Error("discovery_timeout");
+      return matches;
+    }, 5000, "discovery_timeout");
   }
 
   async function pairing(message, sender) {

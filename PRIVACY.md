@@ -25,7 +25,7 @@ New device tokens are stored separately in extension-origin IndexedDB. Pairing s
 
 The app records the browser type, chosen device name, instance ID, and pairing/access times. It holds the extension origin temporarily to bind the one-time claim. This is a random profile identity, not a hardware or browsing fingerprint. Unpairing revokes app authorization; clearing only local credentials does not, and requires later revocation in Starcat. Shared manual Keys require rotation in the app.
 
-Discovery checks only the saved address and loopback ports `5051` / `5001`. It does not scan the LAN or use cloud discovery. Safari currently uses background HTTP and has no CLI native host integration.
+Discovery checks only the saved address and the single default loopback port `5051`. It does not scan the LAN or use cloud discovery. Safari currently uses background HTTP and has no CLI native host integration.
 
 ## Local Communication
 

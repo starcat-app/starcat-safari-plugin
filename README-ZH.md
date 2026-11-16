@@ -71,11 +71,15 @@ Starcat Safari Plugin 是 Starcat 的 GitHub 与 Google 搜索结果增强插件
 1. 在 Safari 打开 Settings → Advanced, 勾选 Show features for web developers。
 2. 在菜单栏打开 Develop, 启用 Allow Unsigned Extensions。
 3. 打开 Safari Settings → Extensions, 使用 Add Temporary Extension 选择本目录: `supports/extensions/starcat-safari-plugin`。
-4. 在 Starcat 的 Settings → Integrations → Browser Plugin 启用服务。
+4. 打开 Starcat → 设置 → 扩展与连接 → 浏览器扩展，启用浏览器插件服务。
 5. 从插件打开“连接 Starcat”，在配对标签页选择发现的 App 后点击连接。
 6. 核对两边六位数字，仅在一致时到 Starcat 批准。
 
-切换到 App 时配对标签页保持打开。发现仅检查保存地址、默认 `5051` 和旧端口 `5001`；高级设置保留自定义地址和手工 Key。发现本身不会申请配对。
+切换到 App 时配对标签页保持打开。发现仅检查保存地址和唯一默认端口 `5051`；高级设置保留自定义地址和手工 Key。发现本身不会申请配对。
+
+自动发现总预算为 5 秒，保存地址与默认地址并行探测，每个 HTTP 地址最多等待 1.3 秒。配对按 App 返回的 120 秒截止时间显示倒计时，到期清除验证码并忽略迟到响应。连接请求 5 秒超时，不自动重放。发现超时、用户拒绝、过期、连接超时和凭据保存失败分别提示。
+
+配对页始终提供“使用 Key 连接”。获取路径为 Starcat → 设置 → 扩展与连接 → 浏览器扩展 → 本地 API Key → 复制；同页可以复制服务地址。已配对的浏览器需先取消配对，再切换为手工 Key。
 
 ## 通信边界
 

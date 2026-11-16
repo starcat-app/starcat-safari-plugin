@@ -71,11 +71,15 @@ Starcat Safari Plugin enhances GitHub repository pages and Google search results
 1. Open Safari Settings → Advanced and enable Show features for web developers.
 2. Open Develop in the menu bar and enable Allow Unsigned Extensions.
 3. Open Safari Settings → Extensions, choose Add Temporary Extension, and select `supports/extensions/starcat-safari-plugin`.
-4. In Starcat, enable Settings → Integrations → Browser Plugin.
+4. In Starcat, open Settings → Extensions & Connections → Browser Extensions and enable Browser Plugin Service.
 5. Open Connect to Starcat from the extension, choose the discovered app, and click Connect in the pairing tab.
 6. Compare the six digits in both windows and approve the matching request in Starcat.
 
-The pairing tab stays open while switching to Starcat. Discovery checks the saved address, default port `5051`, and legacy port `5001`; custom addresses and manual Keys remain available in advanced settings. Discovery does not request approval.
+The pairing tab stays open while switching to Starcat. Discovery checks the saved address and the single default port `5051`; custom addresses and manual Keys remain available in advanced settings. Discovery does not request approval.
+
+Discovery has a five-second total budget, with saved/default HTTP addresses probed in parallel for up to 1.3 seconds each. Pairing shows a countdown to the app's 120-second deadline, clears the code on expiry, and ignores late replies. Connection requests time out after five seconds and are never automatically replayed. Errors distinguish discovery timeout, rejection, expiry, connection timeout, and credential storage failure.
+
+Use **Use a Key to connect** on the pairing page for manual authentication. Copy the Key from Starcat → Settings → Extensions & Connections → Browser Extensions → Local API Key. The same page shows the service address. Unpair an already paired browser before switching to a manual Key.
 
 ## Communication Boundary
 
