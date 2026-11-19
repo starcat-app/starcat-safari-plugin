@@ -20,20 +20,20 @@
         <div class="connection-visual" aria-hidden="true">
           <div class="endpoint">
             <div class="browser-icon">
-              <span id="chrome-icon"><svg viewBox="0 0 48 48">
+              <span id="chrome-icon" hidden><svg viewBox="0 0 48 48">
                 <circle cx="24" cy="24" r="21" fill="#fff"></circle>
                 <path d="M24 3a21 21 0 0 1 18.2 10.5H24a10.5 10.5 0 0 0-9.1 15.75L5.8 13.5A21 21 0 0 1 24 3Z" fill="#EA4335"></path>
                 <path d="M42.2 13.5a21 21 0 0 1-18.2 31.5l9.1-15.75A10.5 10.5 0 0 0 24 13.5Z" fill="#FBBC04"></path>
                 <path d="M24 45A21 21 0 0 1 5.8 13.5l9.1 15.75a10.5 10.5 0 0 0 18.2 0Z" fill="#34A853"></path>
                 <circle cx="24" cy="24" r="9" fill="#4285F4" stroke="#fff" stroke-width="1.5"></circle>
               </svg></span>
-              <span id="safari-icon" hidden><svg viewBox="0 0 48 48">
+              <span id="safari-icon"><svg viewBox="0 0 48 48">
                 <circle cx="24" cy="24" r="21" fill="#1689EE"></circle>
                 <circle cx="24" cy="24" r="17" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="2" stroke-dasharray="1 4"></circle>
                 <path d="m33 15-5 13-13 5 5-13Z" fill="#fff"></path><path d="m33 15-5 13-8-8Z" fill="#EF5350"></path>
               </svg></span>
             </div>
-            <span id="browser-label">Chrome</span>
+            <span id="browser-label">Safari</span>
           </div>
           <div class="connection-line">
             <span class="connection-mark">
@@ -85,8 +85,13 @@
             <p id="code" class="code" aria-live="polite" aria-atomic="true"></p>
             <p id="countdown" class="countdown" role="timer" aria-live="off"></p>
           </div>
-          <p class="help verification-help" data-text="verify_help">Keep this tab open while you approve the request in Starcat.</p>
-          <button id="cancel" class="button secondary" type="button" data-text="cancel" disabled>Cancel request</button>
+          <p class="help verification-help">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 6 2.5V10c0 3.5-6 7-6 7s-6-3.5-6-7V4.5Z"></path><path d="m7.5 9.5 2 2 3-3.5"></path></svg>
+            <span data-text="verify_help">Keep this tab open while you approve the request in Starcat.</span>
+          </p>
+          <div id="verification-footer" class="verification-footer">
+            <button id="cancel" class="button secondary" type="button" data-text="cancel" disabled>Cancel request</button>
+          </div>
         </section>
         <section id="connection-summary" class="connection-summary" hidden>
           <div class="summary-row"><span data-text="browser">Browser</span><strong id="connected-name"></strong></div>
@@ -97,7 +102,7 @@
           <summary><span data-text="manual_summary">Prefer an API Key?</span></summary>
           <div class="details-content">
             <p class="help" data-text="key_help">Copy your Local API Key in Starcat Settings.</p>
-            <a id="manual" class="button secondary" href="../options/options.html" data-text="manual">Use a Key to connect</a>
+            <a id="manual" class="button secondary" href="../options/options.html#manual-key" data-text="manual">Use a Key to connect</a>
           </div>
         </details>
         <details id="connection-management" class="support" hidden>
